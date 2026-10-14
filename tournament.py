@@ -188,12 +188,14 @@ class TournamentManager:
         population = []
         for i in range(self.population_size):
             weights = [
-                random.uniform(5.0, 15.0),  # Regular piece value
-                random.uniform(15.0, 30.0),  # King piece value
-                random.uniform(0.0, 8.0),  # Center control bonus
-                random.uniform(0.0, 5.0)  # Back-row defense bonus
+                random.uniform(5.0, 15.0),   # [0] Regular piece value
+                random.uniform(15.0, 30.0),  # [1] King piece value
+                random.uniform(0.0, 8.0),    # [2] Center control bonus
+                random.uniform(0.0, 5.0),    # [3] Back-row defense bonus
+                random.uniform(0.0, 5.0),    # [4] Edge / border occupation bonus
+                random.uniform(0.0, 5.0)     # [5] Endgame proximity / hunting bonus
             ]
-            name = f"Agent_{i + 1}"
+            name = f"Agent_{i+1}"
             population.append(MinimaxAgent(name=name, weights=weights, depth=self.depth))
         return population
 

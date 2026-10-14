@@ -1,7 +1,8 @@
 class MinimaxAgent:
+
     def __init__(self, name, weights, depth=3):
-        # weights = [w1: regular piece, w2: king piece, w3: center control, w4: defense]
         self.name = name
+        # Weights: [regular_value, king_value, center_bonus, back_row_bonus, edge_bonus, endgame_proximity_bonus]
         self.weights = weights
         self.depth = depth
 
@@ -9,59 +10,113 @@ class MinimaxAgent:
         """Allows direct string representation when printing or formatting (e.g., f'{agent}')."""
         return self.name
 
-    def evaluate(self, board, evaluating_player):
-        """
-        Evaluates board state based on piece weights and position.
-        evaluating_player: 1 (Red) or 2 (Black)
-        """
-        score = 0
+    def evaluate(self, board, player_color):
+        score = 0.0
+        red_pieces_coords = []
+        blue_pieces_coords = []
+
         for r in range(8):
             for c in range(8):
                 piece = board.grid[r][c]
                 if piece == 0:
                     continue
 
-                # Determine if piece belongs to evaluating player
-                is_eval_player_piece = (piece > 0) if evaluating_player == 1 else (piece < 0)
-                sign = 1 if is_eval_player_piece else -1
+                if piece > 0:
+                    red_pieces_coords.append((r, c, abs(piece) == 2))
+                else:
+                    blue_pieces_coords.append((r, c, abs(piece) == 2))
 
-                # Magnitude check for King (2) vs Normal (1)
-                is_king = (abs(piece) == 2)
-                is_center = 2 <= c <= 5 and 2 <= r <= 5
+                is_king = abs(piece) == 2
 
-                # Back-row defense check:
-                # Red (Player 1) defends row 7; Black (Player 2) defends row 0
-                is_back_row = (r == 7 and piece > 0) or (r == 0 and piece < 0)
+                # Material value
+                piece_val = self.weights[1] if is_king else self.weights[0]
 
-                material = self.weights[1] if is_king else self.weights[0]
-                center_bonus = self.weights[2] if is_center else 0
-                defense_bonus = self.weights[3] if is_back_row else 0
+                # Center control bonus (columns 2-5, rows 2-5)
+                center_bonus = self.weights[2] if (2 <= c <= 5 and 2 <= r <= 5) else 0.0
 
-                score += sign * (material + center_bonus + defense_bonus)
+                # Back-row defense bonus (Red on row 7, Blue on row 0)
+                back_row_bonus = self.weights[3] if ((piece > 0 and r == 7) or (piece < 0 and r == 0)) else 0.0
+
+                # Edge / Border occupation bonus (Columns 0 and 7)
+                edge_bonus = self.weights[4] if (c == 0 or c == 7) else 0.0
+
+                total_piece_score = piece_val + center_bonus + back_row_bonus + edge_bonus
+
+                if (piece > 0 and player_color == 1) or (piece < 0 and player_color == -1):
+                    score += total_piece_score
+                else:
+                    score -= total_piece_score
+
+        # ENDGAME PROXIMITY HUNTING: Triggered when total pieces <= 6
+        total_pieces = len(red_pieces_coords) + len(blue_pieces_coords)
+        if total_pieces <= 6 and len(self.weights) > 5:
+            proximity_weight = self.weights[5]
+
+            # Calculate distance gradient between opposing pieces
+            red_score_modifier = 0.0
+            blue_score_modifier = 0.0
+
+            if red_pieces_coords and blue_pieces_coords:
+                # For each Red piece, find minimum Manhattan distance to any Blue piece
+                min_red_dist = float('inf')
+                for rr, rc, _ in red_pieces_coords:
+                    for br, bc, _ in blue_pieces_coords:
+                        dist = abs(rr - br) + abs(rc - bc)
+                        if dist < min_red_dist:
+                            min_red_dist = dist
+                # Closer distance = higher reward (invert distance)
+                red_score_modifier = (14.0 - min_red_dist) * proximity_weight
+
+                # For each Blue piece, find minimum distance to any Red piece
+                min_blue_dist = float('inf')
+                for br, bc, _ in blue_pieces_coords:
+                    for rr, rc, _ in red_pieces_coords:
+                        dist = abs(br - rr) + abs(bc - rc)
+                        if dist < min_blue_dist:
+                            min_blue_dist = dist
+                blue_score_modifier = (14.0 - min_blue_dist) * proximity_weight
+
+            if player_color == 1:
+                score += (red_score_modifier - blue_score_modifier)
+            else:
+                score += (blue_score_modifier - red_score_modifier)
+
         return score
 
     def get_move(self, board):
-        """Entry point for getting the best move using Minimax with Alpha-Beta."""
-        best_score = float('-inf')
-        best_move = None
-        alpha = float('-inf')
-        beta = float('inf')
+        """Adaptive depth: Increase search depth if the board is sparse (endgame)."""
+        total_pieces = 0
+        for r in range(8):
+            for c in range(8):
+                if board.grid[r][c] != 0:
+                    total_pieces += 1
 
-        current_player = board.current_turn
-        legal_moves = board.get_legal_moves(current_player)
+        # If 6 or fewer pieces remain, boost depth to 5 for precise tactical vision
+        current_depth = 5 if total_pieces <= 6 else self.depth
+
+        # Run minimax search at the adjusted depth
+        best_move = None
+        best_score = float('-inf') if board.current_turn == 1 else float('inf')
+
+        legal_moves = board.get_legal_moves(board.current_turn)
+        if not legal_moves:
+            return None
 
         for move in legal_moves:
-            next_board = board.clone()
-            next_board.make_move(move)
+            board_copy = board.clone()
+            board_copy.make_move(move)
 
-            # Evaluate move via minimax recursion
-            score = self.minimax(next_board, self.depth - 1, False, alpha, beta, current_player)
+            # Evaluate using minimax
+            score = self.minimax(board_copy, current_depth - 1, False, float('-inf'), float('inf'), board.current_turn)
 
-            if score > best_score:
-                best_score = score
-                best_move = move
-
-            alpha = max(alpha, best_score)
+            if board.current_turn == 1:
+                if score > best_score:
+                    best_score = score
+                    best_move = move
+            else:
+                if score < best_score:
+                    best_score = score
+                    best_move = move
 
         return best_move
 
