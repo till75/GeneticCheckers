@@ -1,5 +1,6 @@
 # main.py
 import time
+import datetime
 from genetic import GeneticAlgorithm
 from agent import MinimaxAgent
 from tournament import Match
@@ -9,35 +10,67 @@ import matplotlib.pyplot as plt
 def plot_training_run(history):
     gens = history["generation"]
 
-    # Create a figure with 2 subplots (Fitness on top, Weights on bottom)
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    # Create a figure with 2 subplots (Fitness/Diagnostics on top, Weights on bottom)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 9), sharex=True)
 
-    # --- Plot 1: Fitness Progression ---
-    ax1.plot(gens, history["best_fitness"], label="Best Fitness", color="forestgreen", marker="o", linewidth=2)
-    ax1.plot(gens, history["avg_fitness"], label="Population Avg Fitness", color="gray", linestyle="--", marker="x")
-    ax1.set_ylabel("Fitness Score")
-    ax1.set_title("Checkers GA: Fitness Evolution Over Generations")
-    ax1.legend()
+    # --- Plot 1: Fitness Progression & Diagnostics ---
+    line1 = ax1.plot(gens, history["best_fitness"], label="Best Fitness", color="forestgreen", marker="o", linewidth=2)
+    line2 = ax1.plot(gens, history["avg_fitness"], label="Population Avg Fitness", color="gray", linestyle="--",
+                     marker="x")
+    ax1.set_ylabel("Fitness Score", color="forestgreen")
+    ax1.tick_params(axis='y', labelcolor="forestgreen")
+    ax1.set_title("Checkers GA: Fitness Evolution & Match Diagnostics Over Generations")
     ax1.grid(True, linestyle=":", alpha=0.6)
 
-    # --- Plot 2: Weight Trajectories ---
+    # Secondary y-axis for optional metrics
+    ax1_twin = ax1.twinx()
+    lines = line1 + line2
+
+    if "draw_pct" in history and history["draw_pct"]:
+        line3 = ax1_twin.plot(gens, history["draw_pct"], label="Stagnant Draws (%)", color="crimson", linestyle=":",
+                              marker="v")
+        lines += line3
+    if "avg_winner_moves" in history and history["avg_winner_moves"]:
+        line4 = ax1_twin.plot(gens, history["avg_winner_moves"], label="Avg Winner Moves", color="dodgerblue",
+                              linestyle="-.", marker="d")
+        lines += line4
+
+    ax1_twin.set_ylabel("Percentage (%) / Move Count")
+    ax1_twin.tick_params(axis='y')
+
+    labs = [l.get_label() for l in lines]
+    ax1.legend(lines, labs, loc="upper left")
+
+    # --- Plot 2: All 6 Weight Trajectories ---
     weights_transposed = list(zip(*history["best_weights"]))
-    weight_labels = ["Regular Piece", "King Piece", "Center Control", "Back-Row Defense"]
-    colors = ["royalblue", "darkorange", "purple", "crimson"]
+    weight_labels = [
+        "Regular Piece",
+        "King Piece",
+        "Center Control",
+        "Back-Row Defense",
+        "Edge Occupation",
+        "Endgame Proximity"
+    ]
+    colors = ["royalblue", "darkorange", "purple", "crimson", "teal", "sienna"]
 
     for weights, label, color in zip(weights_transposed, weight_labels, colors):
-        ax2.plot(gens, weights, label=label, color=color, marker="s", linewidth=2)
+        ax2.plot(gens, weights, label=label, color=color, marker="s", linewidth=1.5)
 
     ax2.set_xlabel("Generation")
     ax2.set_ylabel("Weight Value")
     ax2.set_title("Evolution of Heuristic Weights (Best Agent per Generation)")
-    ax2.legend(loc="upper left")
+    ax2.legend(loc="upper left", ncol=2)
     ax2.grid(True, linestyle=":", alpha=0.6)
 
     plt.tight_layout()
-    plt.savefig("checkers_evolution_plot.png", dpi=300)
-    print("Saved training plot as 'checkers_evolution_plot.png'")
-    plt.show()
+
+    # Generate timestamped filename and save cleanly without GUI blocking
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"checkers_evolution_plot_{timestamp}.png"
+
+    fig.savefig(filename, dpi=300)
+    print(f"Saved training plot as '{filename}'")
+    plt.close(fig)
 
 
 def showcase():
@@ -81,14 +114,14 @@ def showcase():
 def genetic_training():
     # Initialize GA (e.g., 8 agents, depth 3, 20% mutation chance)
     ga = GeneticAlgorithm(
-        population_size=20,
+        population_size=16,
         depth=3,
-        mutation_rate=0.35,
-        mutation_strength=2.5,
+        mutation_rate=0.15,
+        mutation_strength=0.8,
         elite_count=2
     )
 
-    num_generations = 25
+    num_generations = 10
     for gen in range(num_generations):
         start_time = time.time()
         ga.evolve_generation()

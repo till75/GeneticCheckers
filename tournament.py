@@ -161,18 +161,20 @@ def _run_single_match_worker(agent_pair):
     # Game 1: agent_a (Red) vs agent_b (Blue)
     match_1 = Match(agent_a, agent_b, verbose=False)
     fit_a1, fit_b1, outcome_1 = match_1.run()
+    moves_1 = match_1.stats.move_count
 
     # Game 2: agent_b (Red) vs agent_a (Blue) - swap sides
     match_2 = Match(agent_b, agent_a, verbose=False)
     fit_b2, fit_a2, outcome_2 = match_2.run()
+    moves_2 = match_2.stats.move_count
 
-    # FIX: Use agent names as keys instead of object references
     scores = {
         agent_a.name: fit_a1 + fit_a2,
         agent_b.name: fit_b1 + fit_b2
     }
     outcomes = [outcome_1, outcome_2]
-    return scores, outcomes
+    move_counts = [moves_1, moves_2]
+    return scores, outcomes, move_counts
 
 
 class TournamentManager:
@@ -204,7 +206,10 @@ class TournamentManager:
         name_to_agent = {agent.name: agent for agent in self.population}
         fitness_scores = {agent: 0.0 for agent in self.population}
         match_counts = {agent: 0 for agent in self.population}
-        outcomes_log = {"Elimination": 0, "Max-Move / Stagnation": 0}
+
+        total_matches = 0
+        stagnant_draws = 0
+        decisive_move_counts = []
 
         # Build pair tasks for all unique combinations (Round Robin)
         tasks = []
@@ -217,24 +222,28 @@ class TournamentManager:
         with concurrent.futures.ProcessPoolExecutor() as executor:
             results = executor.map(_run_single_match_worker, tasks)
 
-            for scores, outcomes in results:
+            for scores, outcomes, move_counts in results:
                 for agent_name, score in scores.items():
                     agent = name_to_agent[agent_name]  # Resolve back to original object
                     fitness_scores[agent] += score
                     match_counts[agent] += 2  # 2 games per pair matchup
 
-                for outcome in outcomes:
-                    if "Elimination" in outcome or "Advantage Win" in outcome:
-                        outcomes_log["Elimination"] += 1
+                for outcome, moves in zip(outcomes, move_counts):
+                    total_matches += 1
+                    if "Stalemate" in outcome or "Draw" in outcome:
+                        stagnant_draws += 1
                     else:
-                        outcomes_log["Max-Move / Stagnation"] += 1
+                        decisive_move_counts.append(moves)
 
-        total_matches = sum(outcomes_log.values())
-        if total_matches > 0:
-            elim_pct = (outcomes_log["Elimination"] / total_matches) * 100
-            draw_pct = (outcomes_log["Max-Move / Stagnation"] / total_matches) * 100
-            print(
-                f"   [Diagnostics] Matches: {total_matches} | Decisive / Advantage: {elim_pct:.1f}% | Stagnant Draws: {draw_pct:.1f}%")
+        draw_pct = (stagnant_draws / total_matches) * 100.0 if total_matches > 0 else 0.0
+        avg_winner_moves = sum(decisive_move_counts) / len(decisive_move_counts) if decisive_move_counts else 0.0
+
+        match_stats = {
+            "total_matches": total_matches,
+            "stagnant_draws": stagnant_draws,
+            "draw_pct": draw_pct,
+            "avg_winner_moves": avg_winner_moves
+        }
 
         averaged_fitness = {
             agent: (fitness_scores[agent] / match_counts[agent]) if match_counts[agent] > 0 else 0.0
@@ -242,4 +251,4 @@ class TournamentManager:
         }
 
         ranked_population = sorted(averaged_fitness.items(), key=lambda item: item[1], reverse=True)
-        return ranked_population
+        return ranked_population, match_stats

@@ -21,7 +21,9 @@ class GeneticAlgorithm:
             "generation": [],
             "best_fitness": [],
             "avg_fitness": [],
-            "best_weights": []  # Stores [regular, king, center, defense]
+            "best_weights": [],
+            "draw_pct": [],
+            "avg_winner_moves": []
         }
 
     def evolve_generation(self):
@@ -29,10 +31,14 @@ class GeneticAlgorithm:
         print(f"\n--- Starting Generation {self.generation} ---")
 
         # 1. Evaluate current population via tournament round-robin
-        ranked_population = self.tournament_manager.run_round_robin()
+        ranked_population, match_stats = self.tournament_manager.run_round_robin()
 
         # Print top performer of the generation
         top_agent, top_fitness = ranked_population[0]
+        decisive_pct = 100.0 - match_stats["draw_pct"]
+        print(
+            f"   [Diagnostics] Matches: {match_stats['total_matches']} | Decisive / Advantage: {decisive_pct:.1f}% | "
+            f"Stagnant Draws: {match_stats['draw_pct']:.1f}% | Avg Winner Moves: {match_stats['avg_winner_moves']:.1f}")
         print(
             f"Gen {self.generation} Best -> {top_agent} (Fitness: {top_fitness:.1f}) | Weights: {[round(w, 2) for w in top_agent.weights]}")
 
@@ -43,6 +49,8 @@ class GeneticAlgorithm:
         self.history["best_fitness"].append(top_fitness)
         self.history["avg_fitness"].append(avg_fitness)
         self.history["best_weights"].append(list(top_agent.weights))
+        self.history["draw_pct"].append(match_stats["draw_pct"])
+        self.history["avg_winner_moves"].append(match_stats["avg_winner_moves"])
 
         # Extract just the agent objects in order of fitness (best to worst)
         sorted_agents = [agent for agent, fitness in ranked_population]
