@@ -4,6 +4,7 @@ import os
 from agent import MinimaxAgent
 from board import Board
 
+
 def clear_screen():
     """Clears the terminal screen for a smooth visual animation effect."""
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -11,17 +12,19 @@ def clear_screen():
 
 class MatchStats:
     """Tracks game milestones and statistics for a single match."""
+
     def __init__(self):
         self.red_captures = 0
         self.blue_captures = 0
         self.red_kings_made = 0
         self.blue_kings_made = 0
         self.move_count = 0
-        self.outcome = "Unknown"  # "Red Win", "Blue Win", or "Draw (Max Moves)"
+        self.outcome = "Unknown"
 
 
 class Match:
-    """Encapsulates a single game between two Minimax agents with shaped fitness scoring."""
+    """Encapsulates a single game between two Minimax agents with shaped fitness scoring and anti-draw penalties."""
+
     def __init__(self, ai_red, ai_blue, max_moves=150, verbose=False):
         self.ai_red = ai_red
         self.ai_blue = ai_blue
@@ -86,7 +89,7 @@ class Match:
                 self.stats.blue_kings_made += 1
 
     def _calculate_shaped_fitness(self):
-        """Evaluates final board state, tie-breaks, and computes shaped fitness scores."""
+        """Evaluates final board state and computes shaped fitness scores with severe anti-draw penalties."""
         red_pieces = 0
         blue_pieces = 0
         red_advancement = 0
@@ -104,8 +107,9 @@ class Match:
 
         red_won = False
         blue_won = False
+        is_draw = False
 
-        # Classify exact match outcome for diagnostics
+        # Classify exact match outcome
         if red_pieces > blue_pieces and blue_pieces == 0:
             red_won = True
             self.stats.outcome = "Red Win (Elimination)"
@@ -113,53 +117,67 @@ class Match:
             blue_won = True
             self.stats.outcome = "Blue Win (Elimination)"
         elif self.stats.move_count >= self.max_moves or not self.board.get_legal_moves(self.board.current_turn):
-            # Tie-break logic when max moves reached
-            red_tie_score = (red_pieces * 10) + (red_advancement * 0.5)
-            blue_tie_score = (blue_pieces * 10) + (blue_advancement * 0.5)
-            if red_tie_score >= blue_tie_score:
+            if red_pieces > blue_pieces:
                 red_won = True
-                self.stats.outcome = "Draw / Red Tie-Break Win"
-            else:
+                self.stats.outcome = "Max-Moves / Red Advantage Win"
+            elif blue_pieces > red_pieces:
                 blue_won = True
-                self.stats.outcome = "Draw / Blue Tie-Break Win"
+                self.stats.outcome = "Max-Moves / Blue Advantage Win"
+            else:
+                is_draw = True
+                self.stats.outcome = "Stalemate / True Draw"
 
-        red_fitness = (
-            (50.0 if red_won else 0.0) +
-            (self.stats.red_captures * 5.0) +
-            (self.stats.red_kings_made * 8.0) +
-            (red_pieces * 3.0) +
-            (red_advancement * 0.2)
+        # Base milestone rewards for tactical action (captures and promotions)
+        red_base = (
+                (self.stats.red_captures * 6.0) +
+                (self.stats.red_kings_made * 10.0) +
+                (red_pieces * 3.0) +
+                (red_advancement * 0.2)
         )
 
-        blue_fitness = (
-            (50.0 if blue_won else 0.0) +
-            (self.stats.blue_captures * 5.0) +
-            (self.stats.blue_kings_made * 8.0) +
-            (blue_pieces * 3.0) +
-            (blue_advancement * 0.2)
+        blue_base = (
+                (self.stats.blue_captures * 6.0) +
+                (self.stats.blue_kings_made * 10.0) +
+                (blue_pieces * 3.0) +
+                (blue_advancement * 0.2)
         )
+
+        # Apply anti-stagnation penalties or decisive win bonuses
+        if is_draw:
+            # Zero win bonus and a heavy time penalty to bleed fitness from campers
+            red_fitness = red_base - (self.stats.move_count * 0.2)
+            blue_fitness = blue_base - (self.stats.move_count * 0.2)
+        else:
+            # Decisive games get a large win bonus; losers get a minor penalty minus length tax
+            red_fitness = red_base + (60.0 if red_won else -10.0) - (self.stats.move_count * 0.05)
+            blue_fitness = blue_base + (60.0 if blue_won else -10.0) - (self.stats.move_count * 0.05)
+
+        # Floor fitness at zero
+        red_fitness = max(0.0, red_fitness)
+        blue_fitness = max(0.0, blue_fitness)
 
         return red_fitness, blue_fitness, self.stats.outcome
 
+
 class TournamentManager:
     """Manages agent populations, matchups, and round-robin evaluation scoring."""
+
     def __init__(self, population_size=10, depth=3):
         self.population_size = population_size
         self.depth = depth
         self.population = self._initialize_population()
 
     def _initialize_population(self):
-        """Creates an initial population of agents with randomized heuristic weights."""
         import random
         population = []
         for i in range(self.population_size):
             weights = [
-                random.uniform(5.0, 15.0),   # Regular piece value
+                random.uniform(5.0, 15.0),  # Regular piece value
                 random.uniform(15.0, 30.0),  # King piece value
-                random.uniform(0.0, 8.0),    # Center control bonus
-                random.uniform(0.0, 5.0)     # Back-row defense bonus
+                random.uniform(0.0, 8.0),  # Center control bonus
+                random.uniform(0.0, 5.0)  # Back-row defense bonus
             ]
-            name = f"Agent_{i+1}"
+            name = f"Agent_{i + 1}"
             population.append(MinimaxAgent(name=name, weights=weights, depth=self.depth))
         return population
 
@@ -167,7 +185,6 @@ class TournamentManager:
         fitness_scores = {agent: 0.0 for agent in self.population}
         match_counts = {agent: 0 for agent in self.population}
 
-        # Diagnostic counters
         outcomes_log = {"Elimination": 0, "Max-Move / Stagnation": 0}
 
         n = len(self.population)
@@ -184,7 +201,7 @@ class TournamentManager:
                 match_counts[agent_a] += 1
                 match_counts[agent_b] += 1
 
-                if "Elimination" in outcome_1:
+                if "Elimination" in outcome_1 or "Advantage Win" in outcome_1:
                     outcomes_log["Elimination"] += 1
                 else:
                     outcomes_log["Max-Move / Stagnation"] += 1
@@ -197,18 +214,17 @@ class TournamentManager:
                 match_counts[agent_a] += 1
                 match_counts[agent_b] += 1
 
-                if "Elimination" in outcome_2:
+                if "Elimination" in outcome_2 or "Advantage Win" in outcome_2:
                     outcomes_log["Elimination"] += 1
                 else:
                     outcomes_log["Max-Move / Stagnation"] += 1
 
-        # Store or print generation diagnostics
         total_matches = sum(outcomes_log.values())
         if total_matches > 0:
             elim_pct = (outcomes_log["Elimination"] / total_matches) * 100
             draw_pct = (outcomes_log["Max-Move / Stagnation"] / total_matches) * 100
             print(
-                f"   [Diagnostics] Matches: {total_matches} | Eliminations: {elim_pct:.1f}% | Max-Move Stagnations: {draw_pct:.1f}%")
+                f"   [Diagnostics] Matches: {total_matches} | Decisive / Advantage: {elim_pct:.1f}% | Stagnant Draws: {draw_pct:.1f}%")
 
         averaged_fitness = {
             agent: (fitness_scores[agent] / match_counts[agent]) if match_counts[agent] > 0 else 0.0
