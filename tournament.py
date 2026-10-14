@@ -17,6 +17,7 @@ class MatchStats:
         self.red_kings_made = 0
         self.blue_kings_made = 0
         self.move_count = 0
+        self.outcome = "Unknown"  # "Red Win", "Blue Win", or "Draw (Max Moves)"
 
 
 class Match:
@@ -30,7 +31,7 @@ class Match:
         self.stats = MatchStats()
 
     def run(self):
-        """Executes the game loop from start to finish and returns (red_fitness, blue_fitness)."""
+        """Executes the game loop from start to finish and returns (red_fitness, blue_fitness, outcome_string)."""
         if self.verbose:
             print(f"=== CHECKERS: {self.ai_red} (Red) vs. {self.ai_blue} (Blue) ===")
 
@@ -49,7 +50,6 @@ class Match:
             ai_move = current_agent.get_move(self.board)
 
             if not ai_move:
-                # No legal moves means the current player loses
                 break
 
             self._process_move_milestones(ai_move, current_player)
@@ -85,9 +85,6 @@ class Match:
             else:
                 self.stats.blue_kings_made += 1
 
-        if self.verbose:
-            print(f"AI chose move path: {move.path}")
-
     def _calculate_shaped_fitness(self):
         """Evaluates final board state, tie-breaks, and computes shaped fitness scores."""
         red_pieces = 0
@@ -105,23 +102,27 @@ class Match:
                     blue_pieces += 1
                     blue_advancement += r
 
-        # Determine win/loss status
         red_won = False
         blue_won = False
 
+        # Classify exact match outcome for diagnostics
         if red_pieces > blue_pieces and blue_pieces == 0:
             red_won = True
+            self.stats.outcome = "Red Win (Elimination)"
         elif blue_pieces > red_pieces and red_pieces == 0:
             blue_won = True
+            self.stats.outcome = "Blue Win (Elimination)"
         elif self.stats.move_count >= self.max_moves or not self.board.get_legal_moves(self.board.current_turn):
+            # Tie-break logic when max moves reached
             red_tie_score = (red_pieces * 10) + (red_advancement * 0.5)
             blue_tie_score = (blue_pieces * 10) + (blue_advancement * 0.5)
             if red_tie_score >= blue_tie_score:
                 red_won = True
+                self.stats.outcome = "Draw / Red Tie-Break Win"
             else:
                 blue_won = True
+                self.stats.outcome = "Draw / Blue Tie-Break Win"
 
-        # Shaped fitness formula combining milestones and outcome bonuses
         red_fitness = (
             (50.0 if red_won else 0.0) +
             (self.stats.red_captures * 5.0) +
@@ -138,13 +139,7 @@ class Match:
             (blue_advancement * 0.2)
         )
 
-        if self.verbose:
-            print(f"\n--- Match Statistics ---")
-            print(f"Red ({self.ai_red})  -> Captures: {self.stats.red_captures}, Kings: {self.stats.red_kings_made}, Fitness: {red_fitness:.1f}")
-            print(f"Blue ({self.ai_blue}) -> Captures: {self.stats.blue_captures}, Kings: {self.stats.blue_kings_made}, Fitness: {blue_fitness:.1f}")
-
-        return red_fitness, blue_fitness
-
+        return red_fitness, blue_fitness, self.stats.outcome
 
 class TournamentManager:
     """Manages agent populations, matchups, and round-robin evaluation scoring."""
@@ -169,42 +164,56 @@ class TournamentManager:
         return population
 
     def run_round_robin(self):
-        """
-        Runs a round-robin tournament where every agent plays every other agent
-        twice (swapping sides) to ensure a fair, unbiased fitness ranking.
-        """
         fitness_scores = {agent: 0.0 for agent in self.population}
         match_counts = {agent: 0 for agent in self.population}
 
+        # Diagnostic counters
+        outcomes_log = {"Elimination": 0, "Max-Move / Stagnation": 0}
+
         n = len(self.population)
         for i in range(n):
-            print(f"Evaluating Agent {self.population[i]} in tournament matches...")
             for j in range(i + 1, n):
                 agent_a = self.population[i]
                 agent_b = self.population[j]
 
-                # --- Game 1: Agent A is Red, Agent B is Blue ---
+                # Game 1
                 match_1 = Match(agent_a, agent_b, verbose=False)
-                fit_a1, fit_b1 = match_1.run()
+                fit_a1, fit_b1, outcome_1 = match_1.run()
                 fitness_scores[agent_a] += fit_a1
                 fitness_scores[agent_b] += fit_b1
                 match_counts[agent_a] += 1
                 match_counts[agent_b] += 1
 
-                # --- Game 2: Swap sides (Agent B is Red, Agent A is Blue) ---
+                if "Elimination" in outcome_1:
+                    outcomes_log["Elimination"] += 1
+                else:
+                    outcomes_log["Max-Move / Stagnation"] += 1
+
+                # Game 2 (Swap sides)
                 match_2 = Match(agent_b, agent_a, verbose=False)
-                fit_b2, fit_a2 = match_2.run()
+                fit_b2, fit_a2, outcome_2 = match_2.run()
                 fitness_scores[agent_a] += fit_a2
                 fitness_scores[agent_b] += fit_b2
                 match_counts[agent_a] += 1
                 match_counts[agent_b] += 1
 
-        # Average the fitness scores based on total matches played
+                if "Elimination" in outcome_2:
+                    outcomes_log["Elimination"] += 1
+                else:
+                    outcomes_log["Max-Move / Stagnation"] += 1
+
+        # Store or print generation diagnostics
+        total_matches = sum(outcomes_log.values())
+        if total_matches > 0:
+            elim_pct = (outcomes_log["Elimination"] / total_matches) * 100
+            draw_pct = (outcomes_log["Max-Move / Stagnation"] / total_matches) * 100
+            print(
+                f"   [Diagnostics] Matches: {total_matches} | Eliminations: {elim_pct:.1f}% | Max-Move Stagnations: {draw_pct:.1f}%")
+
         averaged_fitness = {
             agent: (fitness_scores[agent] / match_counts[agent]) if match_counts[agent] > 0 else 0.0
             for agent in self.population
         }
 
-        # Sort population descending by fitness
         ranked_population = sorted(averaged_fitness.items(), key=lambda item: item[1], reverse=True)
         return ranked_population

@@ -81,14 +81,14 @@ def showcase():
 def genetic_training():
     # Initialize GA (e.g., 8 agents, depth 3, 20% mutation chance)
     ga = GeneticAlgorithm(
-        population_size=20,
+        population_size=10,
         depth=3,
         mutation_rate=0.15,
         mutation_strength=0.8,
         elite_count=2
     )
 
-    num_generations = 12
+    num_generations = 7
     for gen in range(num_generations):
         start_time = time.time()
         ga.evolve_generation()
