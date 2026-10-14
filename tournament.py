@@ -1,6 +1,7 @@
 # tournament.py
 import time
 import os
+import concurrent.futures
 from agent import MinimaxAgent
 from board import Board
 
@@ -109,7 +110,6 @@ class Match:
         blue_won = False
         is_draw = False
 
-        # Classify exact match outcome
         if red_pieces > blue_pieces and blue_pieces == 0:
             red_won = True
             self.stats.outcome = "Red Win (Elimination)"
@@ -127,7 +127,6 @@ class Match:
                 is_draw = True
                 self.stats.outcome = "Stalemate / True Draw"
 
-        # Base milestone rewards for tactical action (captures and promotions)
         red_base = (
                 (self.stats.red_captures * 6.0) +
                 (self.stats.red_kings_made * 10.0) +
@@ -142,25 +141,42 @@ class Match:
                 (blue_advancement * 0.2)
         )
 
-        # Apply anti-stagnation penalties or decisive win bonuses
         if is_draw:
-            # Zero win bonus and a heavy time penalty to bleed fitness from campers
             red_fitness = red_base - (self.stats.move_count * 0.2)
             blue_fitness = blue_base - (self.stats.move_count * 0.2)
         else:
-            # Decisive games get a large win bonus; losers get a minor penalty minus length tax
             red_fitness = red_base + (60.0 if red_won else -10.0) - (self.stats.move_count * 0.05)
             blue_fitness = blue_base + (60.0 if blue_won else -10.0) - (self.stats.move_count * 0.05)
 
-        # Floor fitness at zero
         red_fitness = max(0.0, red_fitness)
         blue_fitness = max(0.0, blue_fitness)
 
         return red_fitness, blue_fitness, self.stats.outcome
 
 
+def _run_single_match_worker(agent_pair):
+    """Top-level helper function for ProcessPoolExecutor to execute two games between agent_a and agent_b."""
+    agent_a, agent_b = agent_pair
+
+    # Game 1: agent_a (Red) vs agent_b (Blue)
+    match_1 = Match(agent_a, agent_b, verbose=False)
+    fit_a1, fit_b1, outcome_1 = match_1.run()
+
+    # Game 2: agent_b (Red) vs agent_a (Blue) - swap sides
+    match_2 = Match(agent_b, agent_a, verbose=False)
+    fit_b2, fit_a2, outcome_2 = match_2.run()
+
+    # FIX: Use agent names as keys instead of object references
+    scores = {
+        agent_a.name: fit_a1 + fit_a2,
+        agent_b.name: fit_b1 + fit_b2
+    }
+    outcomes = [outcome_1, outcome_2]
+    return scores, outcomes
+
+
 class TournamentManager:
-    """Manages agent populations, matchups, and round-robin evaluation scoring."""
+    """Manages agent populations, matchups, and parallelized round-robin evaluation scoring."""
 
     def __init__(self, population_size=10, depth=3):
         self.population_size = population_size
@@ -182,42 +198,34 @@ class TournamentManager:
         return population
 
     def run_round_robin(self):
+        # Create a lookup dictionary from name -> agent object
+        name_to_agent = {agent.name: agent for agent in self.population}
         fitness_scores = {agent: 0.0 for agent in self.population}
         match_counts = {agent: 0 for agent in self.population}
-
         outcomes_log = {"Elimination": 0, "Max-Move / Stagnation": 0}
 
+        # Build pair tasks for all unique combinations (Round Robin)
+        tasks = []
         n = len(self.population)
         for i in range(n):
             for j in range(i + 1, n):
-                agent_a = self.population[i]
-                agent_b = self.population[j]
+                tasks.append((self.population[i], self.population[j]))
 
-                # Game 1
-                match_1 = Match(agent_a, agent_b, verbose=False)
-                fit_a1, fit_b1, outcome_1 = match_1.run()
-                fitness_scores[agent_a] += fit_a1
-                fitness_scores[agent_b] += fit_b1
-                match_counts[agent_a] += 1
-                match_counts[agent_b] += 1
+        # Execute matches in parallel across all CPU cores
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            results = executor.map(_run_single_match_worker, tasks)
 
-                if "Elimination" in outcome_1 or "Advantage Win" in outcome_1:
-                    outcomes_log["Elimination"] += 1
-                else:
-                    outcomes_log["Max-Move / Stagnation"] += 1
+            for scores, outcomes in results:
+                for agent_name, score in scores.items():
+                    agent = name_to_agent[agent_name]  # Resolve back to original object
+                    fitness_scores[agent] += score
+                    match_counts[agent] += 2  # 2 games per pair matchup
 
-                # Game 2 (Swap sides)
-                match_2 = Match(agent_b, agent_a, verbose=False)
-                fit_b2, fit_a2, outcome_2 = match_2.run()
-                fitness_scores[agent_a] += fit_a2
-                fitness_scores[agent_b] += fit_b2
-                match_counts[agent_a] += 1
-                match_counts[agent_b] += 1
-
-                if "Elimination" in outcome_2 or "Advantage Win" in outcome_2:
-                    outcomes_log["Elimination"] += 1
-                else:
-                    outcomes_log["Max-Move / Stagnation"] += 1
+                for outcome in outcomes:
+                    if "Elimination" in outcome or "Advantage Win" in outcome:
+                        outcomes_log["Elimination"] += 1
+                    else:
+                        outcomes_log["Max-Move / Stagnation"] += 1
 
         total_matches = sum(outcomes_log.values())
         if total_matches > 0:
