@@ -2,9 +2,9 @@ class MinimaxAgent:
 
     def __init__(self, name, weights, depth=3):
         self.name = name
-        # Weights: [regular_value, king_value, center_bonus, back_row_bonus, edge_bonus, endgame_proximity_bonus]
         self.weights = weights
         self.depth = depth
+        self.fitness = 0.0
 
     def __str__(self):
         """Allows direct string representation when printing or formatting (e.g., f'{agent}')."""

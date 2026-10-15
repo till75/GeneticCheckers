@@ -250,5 +250,9 @@ class TournamentManager:
             for agent in self.population
         }
 
+        # Assign fitness directly to the agent objects for archiving
+        for agent, score in averaged_fitness.items():
+            agent.fitness = score
+
         ranked_population = sorted(averaged_fitness.items(), key=lambda item: item[1], reverse=True)
         return ranked_population, match_stats

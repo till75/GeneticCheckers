@@ -1,5 +1,6 @@
 # main.py
 import time
+import os
 import datetime
 from genetic import GeneticAlgorithm
 from agent import MinimaxAgent
@@ -17,15 +18,20 @@ def plot_training_run(history):
     line1 = ax1.plot(gens, history["best_fitness"], label="Best Fitness", color="forestgreen", marker="o", linewidth=2)
     line2 = ax1.plot(gens, history["avg_fitness"], label="Population Avg Fitness", color="gray", linestyle="--",
                      marker="x")
+
     ax1.set_ylabel("Fitness Score", color="forestgreen")
     ax1.tick_params(axis='y', labelcolor="forestgreen")
     ax1.set_title("Checkers GA: Fitness Evolution & Match Diagnostics Over Generations")
     ax1.grid(True, linestyle=":", alpha=0.6)
 
-    # Secondary y-axis for optional metrics
+    # Secondary y-axis for percentages, move counts, AND HoF benchmark score
     ax1_twin = ax1.twinx()
     lines = line1 + line2
 
+    if "hof_benchmark_score" in history and any(history["hof_benchmark_score"]):
+        line_hof = ax1_twin.plot(gens, history["hof_benchmark_score"], label="HoF Benchmark (%)", color="darkorange",
+                                 linestyle="-", marker="s")
+        lines += line_hof
     if "draw_pct" in history and history["draw_pct"]:
         line3 = ax1_twin.plot(gens, history["draw_pct"], label="Stagnant Draws (%)", color="crimson", linestyle=":",
                               marker="v")
@@ -64,9 +70,12 @@ def plot_training_run(history):
 
     plt.tight_layout()
 
-    # Generate timestamped filename and save cleanly without GUI blocking
+    # Ensure the plots directory exists
+    os.makedirs("plots", exist_ok=True)
+
+    # Prepend 'plots/' to the filename
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"checkers_evolution_plot_{timestamp}.png"
+    filename = f"plots/checkers_evolution_plot_{timestamp}.png"
 
     fig.savefig(filename, dpi=300)
     print(f"Saved training plot as '{filename}'")
@@ -112,16 +121,15 @@ def showcase():
         print(f"\nBaseline agent pulled an upset!")
 
 def genetic_training():
-    # Initialize GA (e.g., 8 agents, depth 3, 20% mutation chance)
     ga = GeneticAlgorithm(
-        population_size=16,
-        depth=3,
-        mutation_rate=0.15,
-        mutation_strength=0.8,
-        elite_count=2
+        population_size=24,        # Expanded from 16 to introduce richer genetic diversity
+        depth=3,                   # Base minimax depth (with automatic endgame boost to 5)
+        mutation_rate=0.18,        # Slightly bumped to encourage escaping local plateaus
+        mutation_strength=1.0,     # Wider step size for weight exploration
+        elite_count=3              # Preserve top 3 champions to lock in structural breakthroughs
     )
 
-    num_generations = 10
+    num_generations = 180          # Perfectly paced for a ~6.5 to 7-hour overnight run
     for gen in range(num_generations):
         start_time = time.time()
         ga.evolve_generation()
@@ -129,7 +137,6 @@ def genetic_training():
         print(f"Generation completed in {elapsed:.2f} seconds.")
 
     print("\n=== Training Complete! ===")
-
     plot_training_run(ga.history)
 
 
